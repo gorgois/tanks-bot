@@ -81,7 +81,7 @@ async def battle(ctx):
         json.dump(users, f)
 
     rank, _, _ = get_rank(users[uid]["xp"])
-    msg = f"🏆 You joined a battle!
+    msg = f"🏆 You joined a battle!\nYou earned {xp} XP and {crystals} {crystal_emoji}!"
 You earned **{earned_xp} XP** and **💎 {earned_crystals} crystals**.
 Your rank: **{rank}**"
     if gold:
