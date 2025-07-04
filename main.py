@@ -1,8 +1,10 @@
-
-
-import discord from discord.ext import commands from discord import app_commands import os from roast import generate_roast from keep_alive import keep_alive from dotenv import load_dotenv
-
-load_dotenv()
+import discord
+from discord.ext import commands
+from discord import app_commands
+import os
+from roast import generate_roast
+from keep_alive import keep_alive
+from dotenv import load_dotenv
 
 TOKEN = os.getenv("DISCORD_TOKEN") GUILD_ID = discord.Object(id=int(os.getenv("GUILD_ID")))  # optional
 
