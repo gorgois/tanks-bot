@@ -1,19 +1,17 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+import openai
 import os
-from roast import generate_roast
-from keep_alive import keep_alive
-from dotenv import load_dotenv
-import traceback
+from flask import Flask
+import threading
 
-load_dotenv()
-
-print(f"OpenAI API Key present? {'Yes' if os.getenv('OPENAI_API_KEY') else 'No'}")
-
+# Get secrets from environment
 TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = os.getenv("GUILD_ID")  # optional
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai.api_key = OPENAI_API_KEY
 
+# Intents
 intents = discord.Intents.default()
 intents.message_content = True
 intents.messages = True
@@ -21,52 +19,58 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-message_history = {}  # Store last messages per user {user_id: [messages]}
 
+# Web server for keeping bot alive (for Render + UptimeRobot)
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Roast Bot is running."
+
+def run_web():
+    app.run(host="0.0.0.0", port=8080)
+
+threading.Thread(target=run_web).start()
+
+# Ready event
 @bot.event
 async def on_ready():
-    print(f"Bot is online as {bot.user}")
     try:
-        if GUILD_ID:
-            guild = discord.Object(id=int(GUILD_ID))
-            synced = await bot.tree.sync(guild=guild)
-            print(f"Synced {len(synced)} commands to guild {GUILD_ID}")
-        else:
-            synced = await bot.tree.sync()
-            print(f"Synced {len(synced)} global commands")
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands!")
     except Exception as e:
-        print(f"Error syncing commands: {e}")
+        print(f"Sync error: {e}")
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    user_id = message.author.id
-    if user_id not in message_history:
-        message_history[user_id] = []
-    message_history[user_id].append(message.content)
-    # Limit history size
-    if len(message_history[user_id]) > 100:
-        message_history[user_id] = message_history[user_id][-100:]
-
-    await bot.process_commands(message)
-
-@bot.tree.command(name="roast", description="Generate a Tanki-style roast for a user")
-@app_commands.describe(user="Select the user to roast")
+# Roast command
+@bot.tree.command(name="roast", description="Pick a user to roast with Tanki-style burns.")
+@app_commands.describe(user="The user you want to roast")
 async def roast(interaction: discord.Interaction, user: discord.Member):
-    await interaction.response.defer(ephemeral=True)
-    try:
-        msgs = message_history.get(user.id, [])
-        if not msgs:
-            msgs = ["They barely speak. Tank rust mode activated."]
-        print(f"DEBUG: Generating roast for {user.name} with messages: {msgs[-5:]}")
-        roast_text = generate_roast(user.name, msgs)
-        print(f"DEBUG: Roast generated: {roast_text}")
-        await interaction.followup.send(content=roast_text, ephemeral=True)
-    except Exception as e:
-        traceback.print_exc()
-        await interaction.followup.send(content=f"❌ Error generating roast: {e}", ephemeral=True)
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
-keep_alive()
+    try:
+        prompt = f"""
+You're a sarcastic Tanki Online veteran from 2012. Someone in the game chat is being annoying, and you need to roast them hard.
+The roast must be funny, clever, and based on Tanki lingo and player stereotypes. Keep it PG-13 but devastating.
+
+Target username: {user.name}
+
+Now generate the roast as if you're talking to them directly.
+"""
+
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+            temperature=0.9
+        )
+
+        roast_text = response.choices[0].message.content.strip()
+        await interaction.followup.send(f"🔥 **Roast for {user.mention}:**\n> {roast_text}", ephemeral=True)
+
+    except Exception as e:
+        print(f"OpenAI error: {e}")
+        await interaction.followup.send("❌ Oops! Something went wrong generating the roast. Try again later.", ephemeral=True)
+
+# Start the bot
 bot.run(TOKEN)
