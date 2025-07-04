@@ -5,11 +5,14 @@ import os
 from roast import generate_roast
 from keep_alive import keep_alive
 from dotenv import load_dotenv
+import traceback
 
 load_dotenv()
 
+print(f"OpenAI API Key present? {'Yes' if os.getenv('OPENAI_API_KEY') else 'No'}")
+
 TOKEN = os.getenv("DISCORD_TOKEN")
-GUILD_ID = os.getenv("GUILD_ID")  # optional: can be None or empty
+GUILD_ID = os.getenv("GUILD_ID")  # optional
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -18,7 +21,7 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-message_history = {}  # {user_id: [messages]}
+message_history = {}  # Store last messages per user {user_id: [messages]}
 
 @bot.event
 async def on_ready():
@@ -43,6 +46,7 @@ async def on_message(message):
     if user_id not in message_history:
         message_history[user_id] = []
     message_history[user_id].append(message.content)
+    # Limit history size
     if len(message_history[user_id]) > 100:
         message_history[user_id] = message_history[user_id][-100:]
 
@@ -52,11 +56,17 @@ async def on_message(message):
 @app_commands.describe(user="Select the user to roast")
 async def roast(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.defer(ephemeral=True)
-    msgs = message_history.get(user.id, [])
-    if not msgs:
-        msgs = ["They barely speak. Tank rust mode activated."]
-    roast_text = generate_roast(user.name, msgs)
-    await interaction.followup.send(content=roast_text, ephemeral=True)
+    try:
+        msgs = message_history.get(user.id, [])
+        if not msgs:
+            msgs = ["They barely speak. Tank rust mode activated."]
+        print(f"DEBUG: Generating roast for {user.name} with messages: {msgs[-5:]}")
+        roast_text = generate_roast(user.name, msgs)
+        print(f"DEBUG: Roast generated: {roast_text}")
+        await interaction.followup.send(content=roast_text, ephemeral=True)
+    except Exception as e:
+        traceback.print_exc()
+        await interaction.followup.send(content=f"❌ Error generating roast: {e}", ephemeral=True)
 
 keep_alive()
 bot.run(TOKEN)
