@@ -6,7 +6,8 @@ from roast import generate_roast
 from keep_alive import keep_alive
 from dotenv import load_dotenv
 
-TOKEN = os.getenv("DISCORD_TOKEN") GUILD_ID = discord.Object(id=int(os.getenv("GUILD_ID")))  # optional
+TOKEN = os.getenv("DISCORD_TOKEN")
+GUILD_ID = discord.Object(id=int(os.getenv("GUILD_ID")))  # optional
 
 intents = discord.Intents.default() intents.message_content = True intents.messages = True intents.guilds = True intents.members = True
 
