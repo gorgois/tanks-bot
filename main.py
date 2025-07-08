@@ -1,30 +1,34 @@
 import os
 import discord
-from discord import app_commands
 from discord.ext import commands
+from discord import app_commands
 from openai import OpenAI
-from dotenv import load_dotenv
 from keep_alive import keep_alive
-keep_alive()
+from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
-
-TOKEN = os.getenv("DISCORD_TOKEN")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-intents = discord.Intents.default()
-client = commands.Bot(command_prefix="/", intents=intents)
+# Initialize OpenAI
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-@client.event
-async def on_ready():
-    await client.tree.sync()
-    print(f"Logged in as {client.user}")
-    await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="DanakisDaGoat"))
+# Bot setup
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# /ask
-@client.tree.command(name="ask", description="Ask the AI a question.")
-@app_commands.describe(prompt="What do you want to ask?")
+# Set bot status
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    activity = discord.Activity(type=discord.ActivityType.listening, name="DanakisDaGoat")
+    await bot.change_presence(activity=activity)
+    print(f"✅ Logged in as {bot.user} and synced commands.")
+
+# /ask command
+@bot.tree.command(name="ask", description="Ask something to the AI")
+@app_commands.describe(prompt="Your question or prompt")
 async def ask(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
     try:
@@ -32,9 +36,17 @@ async def ask(interaction: discord.Interaction, prompt: str):
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}]
         )
-        await interaction.followup.send(response.choices[0].message.content)
+        answer = response.choices[0].message.content
+        await interaction.followup.send(answer)
     except Exception as e:
-        await interaction.followup.send("❌ Something went wrong.")
+        await interaction.followup.send("❌ Something went wrong. Please try again later.")
+        print(f"[ERROR] {e}")
+
+# Keep bot alive
+keep_alive()
+
+# Run the bot
+bot.run(DISCORD_TOKEN)
 
 # /image
 @client.tree.command(name="image", description="Generate an image with AI.")
