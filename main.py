@@ -3,9 +3,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 from openai import OpenAI
-from dotenv import load_dotenv
 
-load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
