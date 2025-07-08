@@ -1,135 +1,115 @@
+import os
 import discord
 from discord.ext import commands
 from discord import app_commands
-import openai
-import os
+from openai import OpenAI
+from dotenv import load_dotenv
 
-# Read tokens from environment variables
-TOKEN = os.getenv("DISCORD_TOKEN")
+load_dotenv()
+
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not TOKEN or not OPENAI_API_KEY:
-    raise ValueError("Missing DISCORD_TOKEN or OPENAI_API_KEY environment variables")
-
-openai.api_key = OPENAI_API_KEY
-
 intents = discord.Intents.default()
-intents.message_content = True
-
 bot = commands.Bot(command_prefix="/", intents=intents)
-tree = bot.tree
+bot.remove_command("help")
+
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands.")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="danakisdagoat"))
-    await tree.sync()
-    print("Slash commands synced.")
+    print(f"Bot is online as {bot.user}")
 
-# --- AI Commands ---
-
-@tree.command(name="ask", description="Ask a question to the AI")
-@app_commands.describe(question="Your question")
-async def ask(interaction: discord.Interaction, question: str):
+# /ask command
+@bot.tree.command(name="ask", description="Ask the AI any question.")
+@app_commands.describe(prompt="Your question or message")
+async def ask(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": question}]
+        response = openai_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="gpt-3.5-turbo"
         )
-        answer = response.choices[0].message.content
-        await interaction.followup.send(answer)
+        await interaction.followup.send(response.choices[0].message.content)
     except Exception as e:
-        await interaction.followup.send(f"⚠️ Error: {str(e)}")
+        await interaction.followup.send("❌ Something went wrong.")
 
-@tree.command(name="image", description="Generate an image from a prompt")
-@app_commands.describe(prompt="Image description")
-async def image(interaction: discord.Interaction, prompt: str):
+# /define command
+@bot.tree.command(name="define", description="Define a word or concept.")
+@app_commands.describe(word="The word to define")
+async def define(interaction: discord.Interaction, word: str):
     await interaction.response.defer()
     try:
-        response = openai.Image.create(
-            prompt=prompt,
-            n=1,
-            size="512x512"
+        response = openai_client.chat.completions.create(
+            messages=[{"role": "user", "content": f"Define the word: {word}"}],
+            model="gpt-3.5-turbo"
         )
-        image_url = response.data[0].url
-        await interaction.followup.send(image_url)
-    except Exception as e:
-        await interaction.followup.send(f"⚠️ Error generating image: {str(e)}")
+        await interaction.followup.send(response.choices[0].message.content)
+    except Exception:
+        await interaction.followup.send("❌ Could not define the word.")
 
-@tree.command(name="joke", description="Get a random joke from AI")
-async def joke(interaction: discord.Interaction):
+# /translate command
+@bot.tree.command(name="translate", description="Translate text to another language.")
+@app_commands.describe(text="Text to translate", language="Language to translate to")
+async def translate(interaction: discord.Interaction, text: str, language: str):
     await interaction.response.defer()
     try:
-        prompt = "Tell me a short, funny joke."
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
+        prompt = f"Translate this to {language}:\n{text}"
+        response = openai_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="gpt-3.5-turbo"
         )
-        joke_text = response.choices[0].message.content
-        await interaction.followup.send(joke_text)
-    except Exception as e:
-        await interaction.followup.send(f"⚠️ Error: {str(e)}")
+        await interaction.followup.send(response.choices[0].message.content)
+    except Exception:
+        await interaction.followup.send("❌ Translation failed.")
 
-@tree.command(name="roast", description="Get an AI-generated roast")
-@app_commands.describe(target="User or topic to roast")
-async def roast(interaction: discord.Interaction, target: str):
-    await interaction.response.defer()
-    try:
-        prompt = f"Make a funny but friendly roast about {target}."
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        roast_text = response.choices[0].message.content
-        await interaction.followup.send(roast_text)
-    except Exception as e:
-        await interaction.followup.send(f"⚠️ Error: {str(e)}")
-
-@tree.command(name="summarize", description="Summarize a text")
+# /summarize command
+@bot.tree.command(name="summarize", description="Summarize a large block of text.")
 @app_commands.describe(text="Text to summarize")
 async def summarize(interaction: discord.Interaction, text: str):
     await interaction.response.defer()
     try:
-        prompt = f"Summarize the following text briefly:\n\n{text}"
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
+        prompt = f"Summarize this:\n{text}"
+        response = openai_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="gpt-3.5-turbo"
         )
-        summary = response.choices[0].message.content
-        await interaction.followup.send(summary)
-    except Exception as e:
-        await interaction.followup.send(f"⚠️ Error: {str(e)}")
+        await interaction.followup.send(response.choices[0].message.content)
+    except Exception:
+        await interaction.followup.send("❌ Could not summarize.")
 
-@tree.command(name="translate", description="Translate text to English")
-@app_commands.describe(text="Text to translate")
-async def translate(interaction: discord.Interaction, text: str):
+# /roast command
+@bot.tree.command(name="roast", description="Roast someone with AI.")
+@app_commands.describe(name="Name or subject to roast")
+async def roast(interaction: discord.Interaction, name: str):
     await interaction.response.defer()
     try:
-        prompt = f"Translate the following text to English:\n\n{text}"
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
+        prompt = f"Roast someone named {name} in a funny and clever way."
+        response = openai_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="gpt-3.5-turbo"
         )
-        translation = response.choices[0].message.content
-        await interaction.followup.send(translation)
-    except Exception as e:
-        await interaction.followup.send(f"⚠️ Error: {str(e)}")
+        await interaction.followup.send(response.choices[0].message.content)
+    except Exception:
+        await interaction.followup.send("❌ Couldn't generate roast.")
 
-@tree.command(name="define", description="Get a definition for a word")
-@app_commands.describe(word="Word to define")
-async def define(interaction: discord.Interaction, word: str):
+# /joke command
+@bot.tree.command(name="joke", description="Tell a random joke.")
+async def joke(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        prompt = f"Define the word: {word}"
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}]
+        response = openai_client.chat.completions.create(
+            messages=[{"role": "user", "content": "Tell me a funny joke"}],
+            model="gpt-3.5-turbo"
         )
-        definition = response.choices[0].message.content
-        await interaction.followup.send(definition)
-    except Exception as e:
-        await interaction.followup.send(f"⚠️ Error: {str(e)}")
+        await interaction.followup.send(response.choices[0].message.content)
+    except Exception:
+        await interaction.followup.send("❌ Couldn't tell a joke.")
 
-if __name__ == "__main__":
-    bot.run(TOKEN)
+bot.run(DISCORD_TOKEN)
