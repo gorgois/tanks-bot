@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 import os
+from keep_alive import keep_alive  # Import the Flask keep-alive server
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -10,11 +11,11 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree  # The command tree for slash commands
+tree = bot.tree
 
 @bot.event
 async def on_ready():
-    await tree.sync()  # Sync slash commands globally (can be slow, use guild-specific for faster)
+    await tree.sync()  # Sync slash commands globally (can take a minute)
     print(f"Logged in as {bot.user}")
 
 @tree.command(name="reactid", description="React to get emoji ID")
@@ -43,5 +44,8 @@ async def reactid(interaction: discord.Interaction):
 
     except asyncio.TimeoutError:
         await interaction.followup.send("⏰ You didn't react in time!")
+
+# Start the keep-alive web server before running the bot
+keep_alive()
 
 bot.run(os.getenv("DISCORD_BOT_TOKEN"))
