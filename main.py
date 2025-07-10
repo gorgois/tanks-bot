@@ -1,5 +1,5 @@
-import discord
-from discord.ext import commands
+import nextcord as discord
+from nextcord.ext import commands
 import asyncio
 import os
 from keep_alive import keep_alive  # Optional
@@ -11,16 +11,19 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree  # this is for slash commands
 
 @bot.event
 async def on_ready():
-    await tree.sync()  # Sync slash commands when bot starts
     print(f"Logged in as {bot.user}")
+    try:
+        synced = await bot.sync_application_commands()
+        print(f"Synced {len(synced)} slash command(s)")
+    except Exception as e:
+        print("Slash command sync failed:", e)
 
-@tree.command(name="reactid", description="React to get emoji ID")
+@bot.slash_command(name="reactid", description="React to get emoji ID")
 async def reactid(interaction: discord.Interaction):
-    await interaction.response.send_message("✅ React to **this message** with your emoji!", ephemeral=False)
+    await interaction.response.send_message("✅ React to **this message** with your emoji!")
     msg = await interaction.original_response()
 
     def check(reaction, user):
@@ -30,7 +33,7 @@ async def reactid(interaction: discord.Interaction):
         reaction, user = await bot.wait_for("reaction_add", timeout=30.0, check=check)
         emoji = reaction.emoji
 
-        if isinstance(emoji, discord.Emoji):
+        if isinstance(emoji, discord.Emoji):  # custom emoji
             embed = discord.Embed(title="Emoji Info", color=discord.Color.blurple())
             embed.add_field(name="Name", value=emoji.name, inline=True)
             embed.add_field(name="ID", value=emoji.id, inline=True)
@@ -45,6 +48,5 @@ async def reactid(interaction: discord.Interaction):
     except asyncio.TimeoutError:
         await interaction.followup.send("⏰ You didn't react in time!")
 
-# Run the bot
 keep_alive()
 bot.run(os.getenv("DISCORD_BOT_TOKEN"))
