@@ -1,8 +1,7 @@
-import nextcord as discord
-from nextcord.ext import commands
+import discord
+from discord.ext import commands
 import asyncio
 import os
-from keep_alive import keep_alive  # Optional
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -11,17 +10,14 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+tree = bot.tree  # The command tree for slash commands
 
 @bot.event
 async def on_ready():
+    await tree.sync()  # Sync slash commands globally (can be slow, use guild-specific for faster)
     print(f"Logged in as {bot.user}")
-    try:
-        synced = await bot.sync_application_commands()
-        print(f"Synced {len(synced)} slash command(s)")
-    except Exception as e:
-        print("Slash command sync failed:", e)
 
-@bot.slash_command(name="reactid", description="React to get emoji ID")
+@tree.command(name="reactid", description="React to get emoji ID")
 async def reactid(interaction: discord.Interaction):
     await interaction.response.send_message("✅ React to **this message** with your emoji!")
     msg = await interaction.original_response()
@@ -39,7 +35,7 @@ async def reactid(interaction: discord.Interaction):
             embed.add_field(name="ID", value=emoji.id, inline=True)
             embed.add_field(name="Animated", value=str(emoji.animated), inline=True)
             embed.set_thumbnail(url=emoji.url)
-        else:
+        else:  # standard emoji
             embed = discord.Embed(title="Emoji Info", description="This is a standard emoji (Unicode)", color=discord.Color.green())
             embed.add_field(name="Emoji", value=emoji)
 
@@ -48,5 +44,4 @@ async def reactid(interaction: discord.Interaction):
     except asyncio.TimeoutError:
         await interaction.followup.send("⏰ You didn't react in time!")
 
-keep_alive()
 bot.run(os.getenv("DISCORD_BOT_TOKEN"))
