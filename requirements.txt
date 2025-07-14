@@ -1,2 +1,5 @@
 discord.py
-Flask
+beautifulsoup4
+requests
+lxml
+flask
