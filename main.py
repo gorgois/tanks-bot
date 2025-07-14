@@ -1,156 +1,91 @@
-import os
 import discord
-from discord.ext import tasks, commands
 from discord import app_commands
-import requests
-import time
-from keep_alive import keep_alive
+from discord.ext import tasks
+import os
+import aiohttp
+import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 intents = discord.Intents.default()
-client = discord.Client(intents=intents)
-tree = app_commands.CommandTree(client)
+intents.message_content = True
+intents.guilds = True
 
-# Cooldown and caching setup
-user_cooldowns = {}  # user_id -> timestamp of last command
-cache = {"players": None, "timestamp": 0}
-CACHE_DURATION = 60  # seconds cooldown for data fetch
+bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot)
 
-RANK_EMOJIS = {
-    # same as before ...
-}
+with open("emojis.json", "r") as f:
+    emojis = json.load(f)
 
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-if not TOKEN:
-    raise ValueError("No Discord token found in environment variable DISCORD_BOT_TOKEN")
-
-def get_players_data():
-    now = time.time()
-    if cache["players"] and now - cache["timestamp"] < CACHE_DURATION:
-        return cache["players"]
-
-    try:
-        response = requests.get("https://ratings.ranked-rtanks.online/api/players")
-        if response.status_code == 429:
-            return "RATE_LIMIT"
-        response.raise_for_status()
-        data = response.json()
-        cache["players"] = data
-        cache["timestamp"] = now
-        return data
-    except Exception as e:
-        print(f"Error fetching players data: {e}")
-        return None
-
-@client.event
+@bot.event
 async def on_ready():
+    print(f'Bot connected as {bot.user}')
     await tree.sync()
-    print(f"Logged in as {client.user}")
     update_status.start()
 
+# 🟢 Update bot status every 10 minutes with online player count
 @tasks.loop(minutes=10)
 async def update_status():
-    data = get_players_data()
-    if isinstance(data, list):
-        online_count = sum(1 for p in data if p.get("online"))
-        await client.change_presence(activity=discord.Game(name=f"{online_count} players online"))
-    else:
-        print("Could not update status due to rate limit or fetch error")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://ratings.ranked-rtanks.online/api/stats") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    count = data.get("online", 0)
+                    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=f"{count} players online"))
+    except Exception as e:
+        print("Failed to update status:", e)
 
-def is_on_cooldown(user_id):
-    now = time.time()
-    last = user_cooldowns.get(user_id, 0)
-    return (now - last) < 30
-
-def set_cooldown(user_id):
-    user_cooldowns[user_id] = time.time()
-
-@tree.command(name="user", description="View player stats")
-@app_commands.describe(username="Player name")
-async def user(interaction: discord.Interaction, username: str):
-    if is_on_cooldown(interaction.user.id):
-        await interaction.response.send_message("⏳ Please wait 30 seconds before using this command again.", ephemeral=True)
-        return
-    set_cooldown(interaction.user.id)
+# 📊 /user command
+@tree.command(name="user", description="Get player stats by nickname")
+@app_commands.describe(nickname="The player's nickname")
+async def user(interaction: discord.Interaction, nickname: str):
     await interaction.response.defer()
-    data = get_players_data()
-    if data == "RATE_LIMIT":
-        await interaction.followup.send("⚠️ Rate limit reached, please try again later.")
-        return
-    if not data:
+    url = f"https://ratings.ranked-rtanks.online/api/user/{nickname}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    embed = discord.Embed(title=f"{data['nickname']}'s Stats", color=discord.Color.gold())
+                    embed.add_field(name="XP", value=data.get("xp", "N/A"), inline=True)
+                    embed.add_field(name="Kills", value=data.get("kills", "N/A"), inline=True)
+                    embed.add_field(name="Deaths", value=data.get("deaths", "N/A"), inline=True)
+                    embed.add_field(name="Crystals", value=data.get("crystals", "N/A"), inline=True)
+                    embed.add_field(name="Gold Boxes", value=data.get("gold_boxes", "N/A"), inline=True)
+                    embed.add_field(name="K/D", value=data.get("kd_ratio", "N/A"), inline=True)
+                    await interaction.followup.send(embed=embed)
+                else:
+                    await interaction.followup.send("❌ Player not found.")
+    except Exception as e:
+        print("User fetch failed:", e)
         await interaction.followup.send("⚠️ Failed to fetch player data. Please try again later.")
-        return
 
-    player = next((p for p in data if p.get("name", "").lower() == username.lower()), None)
-    if not player:
-        await interaction.followup.send(f"❌ Player `{username}` not found.")
-        return
-
-    rank = player.get("rank", "Recruit")
-    emoji = RANK_EMOJIS.get(rank, "")
-    kills = player.get("kills", 0)
-    deaths = player.get("deaths", 1)
-    kd = round(kills / max(deaths,1), 2)
-    xp = player.get("score", 0)
-    crystals = player.get("crystals", 0)
-    goldboxes = player.get("goldboxes", 0)
-    online_status = "🟢 Online" if player.get("online") else "⚫ Offline"
-
-    embed = discord.Embed(title=f"{emoji} {player['name']}", color=discord.Color.blue())
-    embed.add_field(name="Rank", value=rank)
-    embed.add_field(name="Status", value=online_status)
-    embed.add_field(name="Kills", value=kills)
-    embed.add_field(name="Deaths", value=deaths)
-    embed.add_field(name="K/D", value=kd)
-    embed.add_field(name="XP", value=xp)
-    embed.add_field(name="Crystals", value=crystals)
-    embed.add_field(name="Gold Boxes", value=goldboxes)
-    await interaction.followup.send(embed=embed)
-
-@tree.command(name="top", description="Show top players by category")
-@app_commands.describe(category="Select category")
-@app_commands.choices(category=[
-    app_commands.Choice(name="K/D", value="kd"),
-    app_commands.Choice(name="XP", value="xp"),
-    app_commands.Choice(name="Crystals", value="crystals"),
-    app_commands.Choice(name="Gold Boxes", value="goldboxes"),
-])
-async def top(interaction: discord.Interaction, category: app_commands.Choice[str]):
-    if is_on_cooldown(interaction.user.id):
-        await interaction.response.send_message("⏳ Please wait 30 seconds before using this command again.", ephemeral=True)
-        return
-    set_cooldown(interaction.user.id)
+# 🏆 /top command
+@tree.command(name="top", description="Show top players")
+async def top(interaction: discord.Interaction):
     await interaction.response.defer()
-    data = get_players_data()
-    if data == "RATE_LIMIT":
-        await interaction.followup.send("⚠️ Rate limit reached, please try again later.")
-        return
-    if not data:
+    url = "https://ratings.ranked-rtanks.online/api/top"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    embed = discord.Embed(title="🏆 Top Players", color=discord.Color.blurple())
+                    for i, player in enumerate(data[:10], 1):
+                        line = f"**{i}.** {player['nickname']} - {player['xp']} XP {emojis.get('crystals', '')} {player['crystals']}"
+                        embed.add_field(name="\u200b", value=line, inline=False)
+                    await interaction.followup.send(embed=embed)
+                else:
+                    await interaction.followup.send("⚠️ Failed to fetch leaderboard.")
+    except Exception as e:
+        print("Top fetch failed:", e)
         await interaction.followup.send("⚠️ Failed to fetch leaderboard data. Please try again later.")
-        return
 
-    if category.value == "kd":
-        data.sort(key=lambda p: p.get("kills", 0) / max(p.get("deaths", 1), 1), reverse=True)
-    elif category.value == "xp":
-        data.sort(key=lambda p: p.get("score", 0), reverse=True)
-    elif category.value == "crystals":
-        data.sort(key=lambda p: p.get("crystals", 0), reverse=True)
-    elif category.value == "goldboxes":
-        data.sort(key=lambda p: p.get("goldboxes", 0), reverse=True)
-
-    top10 = data[:10]
-    embed = discord.Embed(title=f"Top 10 players by {category.name}", color=discord.Color.gold())
-    for i, p in enumerate(top10, start=1):
-        rank = p.get("rank", "Recruit")
-        emoji = RANK_EMOJIS.get(rank, "")
-        stat_value = {
-            "kd": round(p.get("kills", 0) / max(p.get("deaths", 1), 1), 2),
-            "xp": p.get("score", 0),
-            "crystals": p.get("crystals", 0),
-            "goldboxes": p.get("goldboxes", 0),
-        }[category.value]
-        embed.add_field(name=f"#{i} {emoji} {p['name']}", value=f"{category.name}: {stat_value}", inline=False)
-    await interaction.followup.send(embed=embed)
-
-if __name__ == "__main__":
-    keep_alive()
-    client.run(TOKEN)
+# 🔐 Run the bot
+TOKEN = os.getenv("DISCORD_TOKEN")
+if not TOKEN:
+    print("❌ DISCORD_TOKEN not found in environment variables.")
+else:
+    bot.run(TOKEN)
