@@ -1,91 +1,91 @@
 import discord
+from discord.ext import commands, tasks
 from discord import app_commands
-from discord.ext import tasks
 import os
-import aiohttp
-import json
+import requests
 from dotenv import load_dotenv
+from keep_alive import keep_alive
 
 load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()
-intents.message_content = True
 intents.guilds = True
 
-bot = discord.Client(intents=intents)
-tree = app_commands.CommandTree(bot)
+bot = commands.Bot(command_prefix="!", intents=intents)
+tree = bot.tree
 
-with open("emojis.json", "r") as f:
-    emojis = json.load(f)
+EMOJIS = {
+    "goldboxes": "<:goldbox:1390056100182622401>",
+    "xp": "<:crystals:1390016761851809942>",
+    "crystals": "<:crystals:1390016761851809942>",
+    "kd": "⚔️",
+}
 
 @bot.event
 async def on_ready():
-    print(f'Bot connected as {bot.user}')
-    await tree.sync()
-    update_status.start()
-
-# 🟢 Update bot status every 10 minutes with online player count
-@tasks.loop(minutes=10)
-async def update_status():
+    print(f"Logged in as {bot.user}")
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get("https://ratings.ranked-rtanks.online/api/stats") as response:
-                if response.status == 200:
-                    data = await response.json()
-                    count = data.get("online", 0)
-                    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=f"{count} players online"))
+        synced = await tree.sync()
+        print(f"Synced {len(synced)} command(s)")
     except Exception as e:
-        print("Failed to update status:", e)
+        print(f"Error syncing: {e}")
 
-# 📊 /user command
 @tree.command(name="user", description="Get player stats by nickname")
-@app_commands.describe(nickname="The player's nickname")
+@app_commands.describe(nickname="The nickname of the player")
 async def user(interaction: discord.Interaction, nickname: str):
     await interaction.response.defer()
-    url = f"https://ratings.ranked-rtanks.online/api/user/{nickname}"
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    embed = discord.Embed(title=f"{data['nickname']}'s Stats", color=discord.Color.gold())
-                    embed.add_field(name="XP", value=data.get("xp", "N/A"), inline=True)
-                    embed.add_field(name="Kills", value=data.get("kills", "N/A"), inline=True)
-                    embed.add_field(name="Deaths", value=data.get("deaths", "N/A"), inline=True)
-                    embed.add_field(name="Crystals", value=data.get("crystals", "N/A"), inline=True)
-                    embed.add_field(name="Gold Boxes", value=data.get("gold_boxes", "N/A"), inline=True)
-                    embed.add_field(name="K/D", value=data.get("kd_ratio", "N/A"), inline=True)
-                    await interaction.followup.send(embed=embed)
-                else:
-                    await interaction.followup.send("❌ Player not found.")
+        res = requests.get(f"https://ratings.ranked-rtanks.online/api/user/{nickname}")
+        if res.status_code == 200:
+            data = res.json()
+            embed = discord.Embed(
+                title=f"{data['nickname']}'s Stats",
+                color=discord.Color.gold()
+            )
+            embed.add_field(name="XP", value=f"{EMOJIS['xp']} {data['xp']}", inline=True)
+            embed.add_field(name="Crystals", value=f"{EMOJIS['crystals']} {data['crystals']}", inline=True)
+            embed.add_field(name="K/D", value=f"{EMOJIS['kd']} {data['kill_death_ratio']}", inline=True)
+            embed.add_field(name="Gold Boxes", value=f"{EMOJIS['goldboxes']} {data['gold_boxes']}", inline=True)
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.followup.send("Player not found.")
     except Exception as e:
-        print("User fetch failed:", e)
-        await interaction.followup.send("⚠️ Failed to fetch player data. Please try again later.")
+        print(e)
+        await interaction.followup.send("Failed to fetch data.")
 
-# 🏆 /top command
-@tree.command(name="top", description="Show top players")
-async def top(interaction: discord.Interaction):
+@tree.command(name="top", description="Show leaderboard by category")
+@app_commands.choices(category=[
+    app_commands.Choice(name="XP", value="xp"),
+    app_commands.Choice(name="Crystals", value="crystals"),
+    app_commands.Choice(name="K/D", value="kill_death_ratio"),
+    app_commands.Choice(name="Gold Boxes", value="gold_boxes")
+])
+async def top(interaction: discord.Interaction, category: app_commands.Choice[str]):
     await interaction.response.defer()
-    url = "https://ratings.ranked-rtanks.online/api/top"
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    embed = discord.Embed(title="🏆 Top Players", color=discord.Color.blurple())
-                    for i, player in enumerate(data[:10], 1):
-                        line = f"**{i}.** {player['nickname']} - {player['xp']} XP {emojis.get('crystals', '')} {player['crystals']}"
-                        embed.add_field(name="\u200b", value=line, inline=False)
-                    await interaction.followup.send(embed=embed)
-                else:
-                    await interaction.followup.send("⚠️ Failed to fetch leaderboard.")
+        res = requests.get("https://ratings.ranked-rtanks.online/api/leaderboard")
+        if res.status_code == 200:
+            data = res.json()
+            top_list = sorted(data, key=lambda x: x[category.value], reverse=True)[:10]
+            embed = discord.Embed(
+                title=f"Top 10 by {category.name}",
+                color=discord.Color.green()
+            )
+            for i, player in enumerate(top_list, start=1):
+                emoji = EMOJIS.get(category.value, "")
+                value = player.get(category.value, "N/A")
+                embed.add_field(
+                    name=f"{i}. {player['nickname']}",
+                    value=f"{emoji} {value}",
+                    inline=False
+                )
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.followup.send("Couldn't fetch leaderboard.")
     except Exception as e:
-        print("Top fetch failed:", e)
-        await interaction.followup.send("⚠️ Failed to fetch leaderboard data. Please try again later.")
+        print(e)
+        await interaction.followup.send("Something went wrong.")
 
-# 🔐 Run the bot
-TOKEN = os.getenv("DISCORD_TOKEN")
-if not TOKEN:
-    print("❌ DISCORD_TOKEN not found in environment variables.")
-else:
-    bot.run(TOKEN)
+keep_alive()
+bot.run(TOKEN)
