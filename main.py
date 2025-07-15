@@ -1,62 +1,57 @@
+import os
 import discord
 from discord import app_commands
 from discord.ext import commands
+import requests
 from bs4 import BeautifulSoup
-import httpx
-import os
-from keep_alive import keep_alive
+from keep_alive import keep_alive  # Keeps the bot alive on Render
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
+TOKEN = os.environ.get("DISCORD_TOKEN")
 
 @bot.event
 async def on_ready():
-    print(f"Bot logged in as {bot.user}")
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands")
-    except Exception as e:
-        print(e)
+    await bot.tree.sync()
+    print(f"Logged in as {bot.user}!")
 
-@bot.tree.command(name="user", description="Check stats for a RTanks Online player")
-@app_commands.describe(nickname="Exact in-game nickname")
+@bot.tree.command(name="user", description="Get player stats from Rtanks Online")
+@app_commands.describe(nickname="Exact player nickname")
 async def user(interaction: discord.Interaction, nickname: str):
     await interaction.response.defer()
-
     url = f"https://ratings.ranked-rtanks.online/user/{nickname}"
-
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url)
+    headers = {"User-Agent": "Mozilla/5.0"}
     
-    if r.status_code != 200:
-        await interaction.followup.send("❌ Player not found or website is down.")
-        return
-
-    soup = BeautifulSoup(r.text, "html.parser")
-
     try:
-        rank = soup.select_one("div.player-info span.rank").text.strip()
-        crystals = soup.select_one("div.crystals span.value").text.strip()
-        golds = soup.select_one("div.golds span.value").text.strip()
-        kd = soup.select_one("div.kd span.value").text.strip()
-        xp = soup.select_one("div.xp span.value").text.strip()
-    except:
-        await interaction.followup.send("⚠️ Failed to parse the player data.")
-        return
+        res = requests.get(url, headers=headers)
+        if res.status_code != 200:
+            await interaction.followup.send(f"Player `{nickname}` not found.")
+            return
 
-    embed = discord.Embed(title=f"Stats for {nickname}", color=0x2ecc71)
-    embed.add_field(name="Rank", value=rank, inline=True)
-    embed.add_field(name="Crystals", value=crystals, inline=True)
-    embed.add_field(name="Gold Boxes", value=golds, inline=True)
-    embed.add_field(name="K/D", value=kd, inline=True)
-    embed.add_field(name="XP", value=xp, inline=True)
-    embed.set_footer(text="RTanks Online")
+        soup = BeautifulSoup(res.text, 'html.parser')
+        stats_table = soup.find("table")
+        if not stats_table:
+            await interaction.followup.send(f"Failed to parse stats for `{nickname}`.")
+            return
 
-    await interaction.followup.send(embed=embed)
+        rows = stats_table.find_all("tr")
+        data = {}
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) == 2:
+                key = cols[0].get_text(strip=True)
+                value = cols[1].get_text(strip=True)
+                data[key] = value
 
-# Keep the bot alive
+        embed = discord.Embed(title=f"Stats for {nickname}", color=0x00ffcc)
+        for key, value in data.items():
+            embed.add_field(name=key, value=value, inline=True)
+
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        await interaction.followup.send("An error occurred while fetching data.")
+        print(e)
+
 keep_alive()
-
-# Get token from environment variable
-TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 bot.run(TOKEN)
