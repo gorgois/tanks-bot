@@ -5,7 +5,10 @@ import asyncio
 
 from utils import get_player_stats, get_leaderboard
 
-TOKEN = "YOUR_BOT_TOKEN_HERE"  # Put your bot token here or load from env
+import os
+
+TOKEN = os.getenv("DISCORD_TOKEN")  # Read token from env variable
+  # Put your bot token here or load from env
 
 intents = discord.Intents.default()
 intents.message_content = True
