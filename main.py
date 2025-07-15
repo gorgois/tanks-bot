@@ -8,7 +8,7 @@ CHANNEL_ID = int(os.getenv("TARGET_CHANNEL_ID"))
 
 # Specific users and their custom emoji reactions
 SPECIAL_USERS = {
-    123456789012345678: "🔥",  # Replace with actual user ID
+    1367486289787752448: "🔥",  # Replace with actual user ID
     987654321098765432: "💀"
 }
 
